@@ -10,7 +10,7 @@ template<typename ActorIdType = std::string, typename MessageIdType = std::strin
 class Actor;
 
 template<typename ActorIdType = std::string, typename MessageIdType = std::string, typename MessageType = std::string>
-class ActorManager : public std::enable_shared_from_this<ActorManager<ActorIdType, MessageIdType, MessageType>>
+class ActorManager
 {
 	typedef message_queue<std::unique_ptr<detail::Message<ActorIdType, MessageIdType, MessageType>>> message_queue_type;
 	typedef threadsafe_queue<std::shared_ptr<message_queue_type>> mq_queue_type;
@@ -93,7 +93,7 @@ public:
 		return m_id;
 	}
 private:
-	std::shared_ptr<ActorManager<ActorIdType, MessageIdType, MessageType>> m_aliasManager;
+	ActorManager<ActorIdType, MessageIdType, MessageType>* m_aliasManager;
 	friend class ActorManager<ActorIdType, MessageIdType, MessageType>;
 	MessageIdType m_id;
 };
@@ -125,7 +125,7 @@ bool ActorManager<ActorIdType, MessageIdType, MessageType>::registerActor(const 
 	}
 	try {
 		actor->m_id = name;
-		actor->m_aliasManager = shared_from_this();
+		actor->m_aliasManager = this;
 		std::unique_lock<shared_mutex> lck(m_actorMutex);
 		m_actors.insert(std::make_pair(actor->m_id, ActorHolder(actor, own)));
 	} catch(...) {
@@ -196,13 +196,11 @@ void ActorManager<ActorIdType, MessageIdType, MessageType>::ActorThread(ThreadGr
 			while (q->pop(msg) && !m_bExitFlag && maxIterator -- > 0) {
 				holder.actor->onMessage(msg->src, msg->id, *(msg->msg));
 			}
-			if (!q->empty()) {
-				if (!m_mqq.push(q)) {
-					q->release();
-				}
-			} else {
+			q->lock();
+			if (q->empty() || !m_mqq.push(q)) {
 				q->release();
 			}
+			q->unlock();
 		}
 	}
 }

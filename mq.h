@@ -71,11 +71,16 @@ public:
 		return m_id;
 	}
 	bool empty() {
-		std::lock_guard<MutexType> lck(m_mutex);
 		return m_msgs.empty();
 	}
 	void close() {
 		m_closed = true;
+	}
+	void lock() {
+		m_mutex.lock();
+	}
+	void unlock() {
+		m_mutex.unlock();
 	}
 private:
 	std::atomic_flag m_acquired;

@@ -11,7 +11,7 @@ public:
 		if (messageName == "perf") {
 			auto time = w.ElapsedMilliseconds();
 			if (time != 0) {
-				printf("%s: qps %.2f\n", id().c_str(), float(cnt * 1000) / time);
+				printf("%s: qps %.2f lastTime: %llu\n", id().c_str(), float(cnt * 1000) / time, lastTime);
 			} else {
 				printf("%s: msgCnt: %" PRId64 ", time: %" PRId64 "\n", id().c_str(), cnt.load(), time);
 			}
@@ -21,11 +21,13 @@ public:
 		if (!w.IsRunning()) {
 			w.Start();
 		}
+		lastTime = time(NULL);
 		++cnt;
 	}
 private:
 	std::atomic<uint64_t> cnt;
 	Stopwatch w;
+	time_t lastTime;
 };
 
 class World : public Actor<> {
@@ -38,8 +40,7 @@ public:
 
 int main() {
 	_CrtSetDbgFlag(_CRTDBG_REPORT_FLAG | _CRTDBG_LEAK_CHECK_DF);
-	Singleton<ActorManager<>>::create();
-	auto& inst = Singleton<ActorManager<>>::inst();
+	ActorManager<> inst;
 	inst.start();
 	inst.registerActor("Hello1", new Hello);
 	inst.registerActor("Hello2", new Hello);
@@ -69,6 +70,5 @@ int main() {
 		}
 	}
 	inst.stop();
-	Singleton<ActorManager<>>::destroy();
 	return 0;
 }

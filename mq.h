@@ -23,10 +23,10 @@ namespace detail {
 
 }
 
-template<typename MessageQueueType, typename MutexType = std::mutex>
+template<typename MessageQueueType, typename MutexType = spin_lock>
 class threadsafe_queue;
 
-template<typename MessageType = std::unique_ptr<detail::Message<>>, typename ActorIdType = typename MessageType::element_type::actorIdType, typename MutexType = std::mutex>
+template<typename MessageType = std::unique_ptr<detail::Message<>>, typename ActorIdType = typename MessageType::element_type::actorIdType, typename MutexType = spin_lock>
 class message_queue : public noncopyable {
 public:
 	message_queue(const ActorIdType& id, size_t overhead) : m_closed(false), m_overhead(overhead), m_id(id) {}

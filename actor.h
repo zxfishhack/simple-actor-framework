@@ -196,11 +196,12 @@ void ActorManager<ActorIdType, MessageIdType, MessageType>::ActorThread(ThreadGr
 			while (q->pop(msg) && !m_bExitFlag && maxIterator -- > 0) {
 				holder.actor->onMessage(msg->src, msg->id, *(msg->msg));
 			}
-			q->lock();
+		}
+		{
+			std::lock_guard<message_queue_type> lck(*q);
 			if (q->empty() || !m_mqq.push(q)) {
 				q->release();
 			}
-			q->unlock();
 		}
 	}
 }

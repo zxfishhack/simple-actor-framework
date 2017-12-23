@@ -91,11 +91,16 @@ class threadsafe_queue : public noncopyable {
 public:
 	typedef MutexType mutexType;
 	threadsafe_queue() {}
-	void push(MessageQueueType queue) {
+	bool push(MessageQueueType queue) noexcept {
 		std::lock_guard<MutexType> lck(m_mutex);
-		m_mqs.push_back(queue);
+		try {
+			m_mqs.push_back(queue);
+		} catch(...) {
+			return false;
+		}
+		return true;
 	}
-	bool pop(MessageQueueType& queue) {
+	bool pop(MessageQueueType& queue) noexcept {
 		std::lock_guard<MutexType> lck(m_mutex);
 		if (m_mqs.empty()) {
 			return false;

@@ -105,8 +105,10 @@ bool ActorManager<ActorIdType, MessageIdType, MessageType>::sendMessage(const Ac
 		return false;
 	}
 	auto ret = it->second->push(std::unique_ptr<detail::Message<ActorIdType, MessageIdType, MessageType>>(new detail::Message<ActorIdType, MessageIdType, MessageType>(sourceName, messageName, msg)));
-	if (it->second->acquire()) {
-		m_mqq.push(it->second);
+	if (ret && it->second->acquire()) {
+		if (!m_mqq.push(it->second)) {
+			it->second->release();
+		}
 	}
 	return ret;
 }
@@ -192,7 +194,9 @@ void ActorManager<ActorIdType, MessageIdType, MessageType>::ActorThread(ThreadGr
 				holder.actor->onMessage(msg->src, msg->id, *(msg->msg));
 			}
 			if (!q->empty()) {
-				m_mqq.push(q);
+				if (!m_mqq.push(q)) {
+					q->release();
+				}
 			} else {
 				q->release();
 			}

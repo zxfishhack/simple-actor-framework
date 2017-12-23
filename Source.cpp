@@ -11,9 +11,9 @@ public:
 		if (messageName == "perf") {
 			auto time = w.ElapsedMilliseconds();
 			if (time != 0) {
-				printf("%s: qps %.2f\n", name().c_str(), float(cnt * 1000) / time);
+				printf("%s: qps %.2f\n", id().c_str(), float(cnt * 1000) / time);
 			} else {
-				printf("%s: msgCnt: %" PRId64 ", time: %" PRId64 "\n", name().c_str(), cnt.load(), time);
+				printf("%s: msgCnt: %" PRId64 ", time: %" PRId64 "\n", id().c_str(), cnt.load(), time);
 			}
 			return;
 		}

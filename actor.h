@@ -86,17 +86,16 @@ public:
 		if (!m_aliasManager) {
 			return false;
 		}
-		return m_aliasManager->sendMessage(m_name, targetName, messageName, msg);
+		return m_aliasManager->sendMessage(m_id, targetName, messageName, msg);
 	}
 	virtual void onMessage(const ActorIdType& sourceName, const MessageIdType& messageName, const MessageType& msg) = 0;
-protected:
-	const MessageIdType& name() const {
-		return m_name;
+	const MessageIdType& id() const {
+		return m_id;
 	}
 private:
 	std::shared_ptr<ActorManager<ActorIdType, MessageIdType, MessageType>> m_aliasManager;
 	friend class ActorManager<ActorIdType, MessageIdType, MessageType>;
-	MessageIdType m_name;
+	MessageIdType m_id;
 };
 
 template<typename ActorIdType, typename MessageIdType, typename MessageType>
@@ -125,10 +124,10 @@ bool ActorManager<ActorIdType, MessageIdType, MessageType>::registerActor(const 
 		return false;
 	}
 	try {
-		actor->m_name = name;
+		actor->m_id = name;
 		actor->m_aliasManager = shared_from_this();
 		std::unique_lock<shared_mutex> lck(m_actorMutex);
-		m_actors.insert(std::make_pair(actor->m_name, ActorHolder(actor, own)));
+		m_actors.insert(std::make_pair(actor->m_id, ActorHolder(actor, own)));
 	} catch(...) {
 		freeMq(name);
 		return false;

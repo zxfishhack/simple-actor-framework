@@ -1,5 +1,4 @@
 #pragma once
-#include <string>
 #include "design_pattern.h"
 #include "threadgroup.h"
 #include "shared_mutex.h"

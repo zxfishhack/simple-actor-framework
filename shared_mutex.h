@@ -43,7 +43,6 @@ public:
 	}
 private:
 	SharedMutex& _mtx;
-
 	void operator=(const shared_lock& rhs);
 	shared_lock(const shared_lock& rhs);
 };

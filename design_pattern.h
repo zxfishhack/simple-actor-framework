@@ -196,8 +196,8 @@ class ObjectPool : noncopyable {
 public:
 	template<typename ...Args>
 	ObjectPool(size_t num, Args&&... args) {
-		for (auto i : range<size_t>(0, num)) {
-			_objs.emplace_back(new T(std::forward <Args>(args)...));
+		while(num--) {
+			_objs.emplace_back(new T(std::forward <Args&&>(args)...));
 		}
 	}
 	std::shared_ptr<T> get() {
@@ -235,8 +235,8 @@ class ObjectPool<T, void, typename std::enable_if<has_reset<T>::type::value>::ty
 public:
 	template<typename ...Args>
 	ObjectPool(size_t num, Args&&... args) {
-		for(auto i : range<size_t>(0, num)) {
-			_objs.emplace_back(new T(std::forward <Args>(args)...));
+		while(num--) {
+			_objs.emplace_back(new T(std::forward<Args&&>(args)...));
 		}
 	}
 	std::shared_ptr<T> get() {

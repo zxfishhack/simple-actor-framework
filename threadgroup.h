@@ -33,7 +33,7 @@ public:
 			m_Threads.push_back(ctx);
 			return true;
 		}
-		catch(const std::exception& e)
+		catch(const std::exception&)
 		{
 			//m_log.notice("TG[%s] T[%s] begin failed, exception[%s].", m_name.c_str(), name, e.what());
 			m_initError = true;

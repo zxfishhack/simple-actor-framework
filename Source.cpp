@@ -21,7 +21,7 @@ public:
 		if (!w.IsRunning()) {
 			w.Start();
 		}
-		cnt++;
+		++cnt;
 	}
 private:
 	std::atomic<uint64_t> cnt;

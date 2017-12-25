@@ -6,7 +6,7 @@
 
 class Hello : public Actor<> {
 public:
-	Hello() : cnt(0){}
+	Hello() : cnt(0), lastTime(0){}
 	void onMessage(const std::string& sourceName, const std::string& messageName, const std::string& msg) override {
 		if (messageName == "perf") {
 			auto time = w.ElapsedMilliseconds();

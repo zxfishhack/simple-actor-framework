@@ -84,7 +84,7 @@ public:
 	}
 private:
 	std::atomic_flag m_acquired;
-	std::atomic_bool m_closed;
+	std::atomic<bool> m_closed;
 	MutexType m_mutex;
 	std::deque<MessageType> m_msgs;
 	size_t m_overhead;

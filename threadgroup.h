@@ -20,16 +20,14 @@ public:
 	{
 		Join();
 	}
-	//使用的函数原型为void Foo(CThreadGroup::InitDone done, ...);，调用done()以表示初始化成功，抛出异常表示初始化失败。
-	template<typename Func, typename ...Arg>
-	bool Attach(const char* name, Func func, Arg... args)
+	bool Attach(const char* name, std::function<void(InitDone)> func)
 	{
 		try
 		{
 			++m_initNeed;
 			auto ctx = new Thread;
 			ctx->name = name;
-			ctx->thr = new std::thread(&ThreadGroup::Runner, this, ctx, std::bind(func, std::forward<Arg>(args)..., m_done));
+			ctx->thr = new std::thread(&ThreadGroup::Runner, this, ctx, func);
 			m_Threads.push_back(ctx);
 			return true;
 		}
@@ -73,12 +71,12 @@ private:
 	std::atomic<int> m_initNeed;
 	InitDone m_done;
 
-	void Runner(Thread* ctx, std::function<void()> func)
+	void Runner(Thread* ctx, std::function<void(InitDone)> func)
 	{
 		//m_log.info("TG[%s], T[%s] begined.", m_name.c_str(), ctx->name.c_str());
 		try
 		{
-			func();
+			func(m_done);
 		}
 		catch(const std::exception& )
 		{

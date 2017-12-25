@@ -35,7 +35,7 @@ private:
 		try {
 			q = new message_queue_type(name, messageQueueOverhead);
 			std::unique_lock<shared_mutex> lck(m_mqMutex);
-			m_mqs.insert(std::make_pair(name, q));
+			m_mqs.insert(std::make_pair(name, std::shared_ptr<message_queue_type>(q)));
 		} catch(...) {
 			if (q) {
 				delete q;
@@ -150,7 +150,7 @@ bool ActorManager<ActorIdType, MessageIdType, MessageType>::start(int threadNum)
 	m_bExitFlag = false;
 	for(auto i=0; i<threadNum; i++) {
 		snprintf(threadName, sizeof(threadName), "ActorThread#%04d", i);
-		m_actorThreads.Attach(threadName, &ActorManager<ActorIdType, MessageIdType, MessageType>::ActorThread, this);
+		m_actorThreads.Attach(threadName, std::bind(&ActorManager<ActorIdType, MessageIdType, MessageType>::ActorThread, this, std::placeholders::_1));
 	}
 	return m_actorThreads.WaitInitDone();
 }

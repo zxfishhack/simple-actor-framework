@@ -3,6 +3,16 @@
 #include "spin_lock.h"
 #include "design_pattern.h"
 #include <memory>
+#include <condition_variable>
+
+enum SEND_MESSAGE_RESULT
+{
+	E_SMR_OK,
+	E_SMR_CLOSED,
+	E_SMR_MEMORY,
+	E_SMR_NOTFOUND,
+	E_SMR_NOTREGISTER
+};
 
 namespace detail {
 
@@ -14,40 +24,42 @@ namespace detail {
 		Message(const ActorIdType& src_, const MessageIdType& id_, MessageType* msg_)
 			: src(src_), id(id_), msg(msg_)
 		{}
-		Message(Message<ActorIdType, MessageIdType>&& rhs) noexcept 
+		Message(Message<ActorIdType, MessageIdType>&& rhs) 
 		: src(rhs.src), id(rhs.id), msg(rhs.msg) {}
 		ActorIdType src;
 		MessageIdType id;
 		std::unique_ptr<MessageType> msg;
 	};
-
 }
 
-template<typename MessageQueueType, typename MutexType = spin_lock>
+template<typename MessageQueueType>
 class threadsafe_queue;
 
 template<typename MessageType = std::unique_ptr<detail::Message<>>, typename ActorIdType = typename MessageType::element_type::actorIdType, typename MutexType = spin_lock>
 class message_queue : public noncopyable {
 public:
-	message_queue(const ActorIdType& id, size_t overhead) : m_closed(false), m_overhead(overhead), m_id(id) {}
+	message_queue(const ActorIdType& id, size_t overhead) : m_closed(false), m_overhead(overhead), m_id(id)
+	{
+		m_acquired.clear();
+	}
 	~message_queue() {
 		while (!acquire()) {}
 		std::lock_guard<MutexType> lck(m_mutex);
 	}
-	bool push(MessageType msg) noexcept {
+	SEND_MESSAGE_RESULT push(MessageType msg) {
 		if (m_closed) {
-			return false;
+			return E_SMR_CLOSED;
 		}
 		std::lock_guard<MutexType> lck(m_mutex);
 		try {
 			m_msgs.push_back(std::move(msg));
 		}
 		catch (...) {
-			return false;
+			return E_SMR_MEMORY;
 		}
-		return true;
+		return E_SMR_OK;
 	}
-	bool pop(MessageType& msg) noexcept {
+	bool pop(MessageType& msg) {
 		msg = nullptr;
 		std::lock_guard<MutexType> lck(m_mutex);
 		if (m_msgs.empty()) {
@@ -91,31 +103,56 @@ private:
 	ActorIdType m_id;
 };
 
-template<typename MessageQueueType, typename MutexType>
+template<typename MessageQueueType>
 class threadsafe_queue : public noncopyable {
 public:
-	typedef MutexType mutexType;
-	threadsafe_queue() {}
-	bool push(MessageQueueType queue) noexcept {
-		std::lock_guard<MutexType> lck(m_mutex);
+	threadsafe_queue() : m_closed(false) {}
+	bool push(MessageQueueType queue) {
+		std::lock_guard<std::mutex> lck(m_mutex);
+		if (m_closed)
+		{
+			return false;
+		}
 		try {
 			m_mqs.push_back(queue);
 		} catch(...) {
 			return false;
 		}
+		m_cv.notify_one();
 		return true;
 	}
-	bool pop(MessageQueueType& queue) noexcept {
-		std::lock_guard<MutexType> lck(m_mutex);
-		if (m_mqs.empty()) {
+	bool pop(MessageQueueType& queue) {
+		std::unique_lock<std::mutex> lck(m_mutex);
+		while (m_mqs.empty() && !m_closed)
+		{
+			m_cv.wait(lck);
+		}
+		if (m_mqs.empty())
+		{
 			return false;
 		}
 		queue = m_mqs.front();
 		m_mqs.pop_front();
 		return true;
 	}
+	void close()
+	{
+		m_closed = true;
+		m_cv.notify_all();
+	}
+	void clear()
+	{
+		m_closed = false;
+		for(auto it = m_mqs.begin(); it != m_mqs.end(); ++it)
+		{
+			(*it)->release();
+		}
+		m_mqs.clear();
+	}
 private:
-	MutexType m_mutex;
+	std::atomic<bool> m_closed;
+	std::condition_variable m_cv;
+	std::mutex m_mutex;
 	std::deque<MessageQueueType> m_mqs;
 };
 

@@ -4,7 +4,9 @@
 
 class spin_lock : public noncopyable {
 public:
-	spin_lock() {}
+	spin_lock() {
+		flag.clear();
+	}
 	void lock() {
 		while (flag.test_and_set(std::memory_order_acquire));
 	}

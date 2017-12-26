@@ -2,8 +2,6 @@
 #if _MSC_VER >= 1900
 #include <mutex>
 #include <atomic>
-#else
-#define noexcept
 #endif
 #include <map>
 #include <deque>
@@ -14,10 +12,10 @@ class noncopyable {
 public:
 	noncopyable() {}
 private:
-	noncopyable(noncopyable&&) noexcept {}
-	noncopyable(noncopyable&) noexcept {}
-	void operator=(noncopyable&&) const noexcept {}
-	void operator=(noncopyable&) const noexcept {}
+	noncopyable(noncopyable&&) {}
+	noncopyable(noncopyable&) {}
+	void operator=(noncopyable&&) const {}
+	void operator=(noncopyable&) const {}
 };
 
 template<typename T>

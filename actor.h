@@ -92,7 +92,13 @@ class ActorManager
 {
 	typedef ActorImpl<ActorIdType, MessageIdType, MessageType> ActorHolder;
 public:
-	~ActorManager() {}
+	~ActorManager() {
+		std::map<ActorIdType, std::shared_ptr<ActorHolder>> actors;
+		{
+			std::lock_guard<shared_mutex> lck(m_actorMutex);
+			actors.swap(m_actors);
+		}
+	}
 	SEND_MESSAGE_RESULT sendMessage(const ActorIdType& sourceName, const ActorIdType& targetName, const MessageIdType& messageName, MessageType* msg) {
 		std::shared_ptr<ActorHolder> holder;
 		{

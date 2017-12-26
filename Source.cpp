@@ -2,6 +2,7 @@
 #include <iostream>
 #include "stopwatch.h"
 #include <stdio.h>
+#include <string>
 #include <inttypes.h>
 
 class Hello : public Actor<> {
@@ -41,7 +42,6 @@ public:
 int main() {
 	_CrtSetDbgFlag(_CRTDBG_REPORT_FLAG | _CRTDBG_LEAK_CHECK_DF);
 	ActorManager<> inst;
-	inst.start();
 	inst.registerActor("Hello1", new Hello);
 	inst.registerActor("Hello2", new Hello);
 	inst.registerActor("Hello3", new Hello);
@@ -69,6 +69,5 @@ int main() {
 			inst.releaseActor(cmd);
 		}
 	}
-	inst.stop();
 	return 0;
 }

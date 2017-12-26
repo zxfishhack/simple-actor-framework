@@ -1,227 +1,143 @@
 #pragma once
 #include "design_pattern.h"
-#include "threadgroup.h"
-#include "shared_mutex.h"
 #include <memory>
 #include <map>
 #include <mutex>
+#include "shared_mutex.h"
 #include "mq.h"
 
-#if _MSC_VER <= 1700
-#define WIN32_LEAN_AND_MEAN
-#include <Windows.h>
-#endif
+template<typename ActorIdType = std::string, typename MessageIdType = std::string, typename MessageType = std::string>
+class ActorImpl;
 
 template<typename ActorIdType = std::string, typename MessageIdType = std::string, typename MessageType = std::string>
-class Actor;
+class Actor
+{
+public:
+	virtual ~Actor() {}
+	SEND_MESSAGE_RESULT sendMessage(const ActorIdType& targetName, const MessageIdType& messageName, MessageType* msg) const
+	{
+		if (!m_impl) {
+			delete msg;
+			return E_SMR_NOTREGISTER;
+		}
+		return m_impl->sendMessage(targetName, messageName, msg);
+	}
+	virtual void onEnter() {}
+	virtual void onExit() {}
+	virtual void onMessage(const ActorIdType& sourceName, const MessageIdType& messageName, const MessageType& msg) = 0;
+	const ActorIdType& id() const {
+		return m_id;
+	}
+private:
+	friend class ActorImpl<ActorIdType, MessageIdType, MessageType>;
+	ActorImpl<ActorIdType, MessageIdType, MessageType>* m_impl;
+	ActorIdType m_id;
+};
 
 template<typename ActorIdType = std::string, typename MessageIdType = std::string, typename MessageType = std::string>
+class ActorManager;
+
+template<typename ActorIdType, typename MessageIdType, typename MessageType>
+class ActorImpl {
+public:
+	typedef std::unique_ptr<detail::Message<ActorIdType, MessageIdType, MessageType>> messageType;
+	ActorImpl(const ActorIdType& id, ActorManager<ActorIdType, MessageIdType, MessageType>* mgr, Actor<ActorIdType, MessageIdType, MessageType>* actor, bool own, size_t messageQueueOverhead)
+		: m_own(own), m_exitFlag(false), m_actor(actor), m_mgr(mgr), m_messageQueue(messageQueueOverhead) {
+		actor->m_impl = this;
+		actor->m_id = id;
+		m_thread = std::thread([this]()
+		{
+			messageType msg;
+			m_actor->onEnter();
+			while(!m_exitFlag) {
+				if (!m_messageQueue.pop(msg)) {
+					continue;
+				}
+				m_actor->onMessage(msg->src, msg->id, *(msg->msg));
+			}
+		});
+	}
+	~ActorImpl() {
+		m_exitFlag = true;
+		m_messageQueue.close();
+		if (m_thread.joinable()) {
+			m_thread.join();
+		}
+		messageType msg;
+		while(m_messageQueue.pop(msg)) {
+			m_actor->onMessage(msg->src, msg->id, *(msg->msg));
+		}
+		m_actor->onExit();
+		if (m_own) {
+			delete m_actor;
+		}
+	}
+	SEND_MESSAGE_RESULT sendMessage(const ActorIdType& targetName, const MessageIdType& messageName, MessageType* msg) const {
+		return m_mgr->sendMessage(m_actor->id(), targetName, messageName, msg);
+	}
+	SEND_MESSAGE_RESULT enqueue(messageType msg) {
+		return m_messageQueue.push(std::move(msg));
+	}
+private:
+	bool m_own;
+	bool m_exitFlag;
+	Actor<ActorIdType, MessageIdType, MessageType>* m_actor;
+	ActorManager<ActorIdType, MessageIdType, MessageType>* m_mgr;
+	message_queue<messageType> m_messageQueue;
+	std::thread m_thread;
+};
+
+template<typename ActorIdType, typename MessageIdType, typename MessageType>
 class ActorManager
 {
-	typedef message_queue<std::unique_ptr<detail::Message<ActorIdType, MessageIdType, MessageType>>> message_queue_type;
-	typedef threadsafe_queue<std::shared_ptr<message_queue_type>> mq_queue_type;
+	typedef ActorImpl<ActorIdType, MessageIdType, MessageType> ActorHolder;
 public:
-	static const int DEFAULT_THREAD_NUM = 4;
-	ActorManager() : m_bExitFlag(false), m_actorThreads("ActorManager") {}
 	~ActorManager() {}
-	SEND_MESSAGE_RESULT sendMessage(const ActorIdType& sourceName, const ActorIdType& targetName, const MessageIdType& messageName, MessageType* msg);
+	SEND_MESSAGE_RESULT sendMessage(const ActorIdType& sourceName, const ActorIdType& targetName, const MessageIdType& messageName, MessageType* msg) {
+		std::shared_ptr<ActorHolder> holder;
+		{
+			shared_lock<shared_mutex> lck(m_actorMutex);
+			auto it = m_actors.find(targetName);
+			if (it != m_actors.end()) {
+				holder = it->second;
+			}
+		}
+		if (!holder)
+		{
+			delete msg;
+			return E_SMR_NOTFOUND;
+		}
+		return holder->enqueue(ActorHolder::messageType(new typename ActorHolder::messageType::element_type(sourceName, messageName, msg)));
+	}
 	bool registerActor(const ActorIdType& name, Actor<ActorIdType, MessageIdType, MessageType>* actor, size_t messageQueueOverhead = 1024) {
 		return registerActor(name, actor, true, messageQueueOverhead);
 	}
 	bool registerActor(const ActorIdType& name, Actor<ActorIdType, MessageIdType, MessageType>& actor, size_t messageQueueOverhead = 1024) {
 		return registerActor(name, &actor, false, messageQueueOverhead);
 	}
-	void releaseActor(const ActorIdType& name);
-	bool start(int threadNum = DEFAULT_THREAD_NUM);
-	void stop();
-
-	std::function<void(ActorManager<ActorIdType, MessageIdType, MessageType>* mgr, ActorIdType id)> onRegistered;
-private:
-	bool registerActor(const ActorIdType& name, Actor<ActorIdType, MessageIdType, MessageType>* actor, bool own, size_t messageQueueOverhead);
-	bool newMq(const ActorIdType& name, size_t messageQueueOverhead = 1024) {
-		message_queue_type* q = nullptr;
-		try {
-			q = new message_queue_type(name, messageQueueOverhead);
-			std::unique_lock<shared_mutex> lck(m_mqMutex);
-			m_mqs.insert(std::make_pair(name, std::shared_ptr<message_queue_type>(q)));
-		} catch(...) {
-			if (q) {
-				delete q;
+	void releaseActor(const ActorIdType& name) {
+		std::shared_ptr<ActorHolder> holder;
+		{
+			std::lock_guard<shared_mutex> lck(m_actorMutex);
+			auto it = m_actors.find(name);
+			if (it != m_actors.end()) {
+				holder = it->second;
+				m_actors.erase(it);
 			}
+		}
+	}
+private:
+	bool registerActor(const ActorIdType& name, Actor<ActorIdType, MessageIdType, MessageType>* actor, bool own, size_t messageQueueOverhead) {
+		try {
+			std::shared_ptr<ActorHolder> holder(new ActorHolder(name, this, actor, own, messageQueueOverhead));
+			std::lock_guard<shared_mutex> lck(m_actorMutex);
+			m_actors.insert(std::make_pair(name, holder));
+		}
+		catch(...) {
 			return false;
 		}
 		return true;
 	}
-	void freeMq(const ActorIdType& name) {
-		std::unique_lock<shared_mutex> lck(m_mqMutex);
-		auto it = m_mqs.find(name);
-		if (it != m_mqs.end()) {
-			it->second->close();
-			m_mqs.erase(it);
-		}
-	}
-	class ActorHolder : public noncopyable
-	{
-	public:
-		ActorHolder(Actor<ActorIdType, MessageIdType, MessageType>* _actor = nullptr, bool _owned = false) : actor(_actor), owned(_owned) {}
-		ActorHolder(ActorHolder&& rhs) : actor(rhs.actor), owned(rhs.owned)
-		{
-			rhs.actor = nullptr;
-		}
-		~ActorHolder();
-		Actor<ActorIdType, MessageIdType, MessageType>* actor;
-		bool owned;
-	};
-	void ActorThread(ThreadGroup::InitDone done);
-	volatile bool m_bExitFlag;
-	ThreadGroup m_actorThreads;
 	shared_mutex m_actorMutex;
 	std::map<ActorIdType, std::shared_ptr<ActorHolder>> m_actors;
-	shared_mutex m_mqMutex;
-	std::map<ActorIdType, std::shared_ptr<message_queue_type>> m_mqs;
-	mq_queue_type m_mqq;
 };
-
-template<typename ActorIdType, typename MessageIdType, typename MessageType>
-class Actor
-{
-public:
-	Actor() : m_aliasManager(nullptr)
-	{}
-	virtual ~Actor() {}
-	SEND_MESSAGE_RESULT sendMessage(const ActorIdType& targetName, const MessageIdType& messageName, MessageType* msg) const
-	{
-		if (!m_aliasManager) {
-			delete msg;
-			return E_SMR_NOTREGISTER;
-		}
-		return m_aliasManager->sendMessage(m_id, targetName, messageName, msg);
-	}
-	virtual void onMessage(const ActorIdType& sourceName, const MessageIdType& messageName, const MessageType& msg) = 0;
-	const MessageIdType& id() const {
-		return m_id;
-	}
-private:
-	ActorManager<ActorIdType, MessageIdType, MessageType>* m_aliasManager;
-	friend class ActorManager<ActorIdType, MessageIdType, MessageType>;
-	MessageIdType m_id;
-};
-
-template<typename ActorIdType, typename MessageIdType, typename MessageType>
-SEND_MESSAGE_RESULT ActorManager<ActorIdType, MessageIdType, MessageType>::sendMessage(const ActorIdType& sourceName, const ActorIdType& targetName, const MessageIdType& messageName, MessageType* msg) {
-	shared_lock<shared_mutex> lck(m_mqMutex);
-	auto it = m_mqs.find(targetName);
-	if (it == m_mqs.end())
-	{
-		delete msg;
-		return E_SMR_NOTFOUND;
-	}
-	auto ret = it->second->push(std::unique_ptr<detail::Message<ActorIdType, MessageIdType, MessageType>>(new detail::Message<ActorIdType, MessageIdType, MessageType>(sourceName, messageName, msg)));
-	if (ret == E_SMR_OK && it->second->acquire()) {
-		if (!m_mqq.push(it->second)) {
-			it->second->release();
-		}
-	}
-	if (ret != E_SMR_OK)
-	{
-		delete msg;
-	}
-	return ret;
-}
-
-template<typename ActorIdType, typename MessageIdType, typename MessageType>
-bool ActorManager<ActorIdType, MessageIdType, MessageType>::registerActor(const ActorIdType& name, Actor<ActorIdType, MessageIdType, MessageType>* actor, bool own, size_t messageQueueOverhead = 1024) {
-	if (!actor) {
-		return false;
-	}
-	if (!newMq(name, messageQueueOverhead)) {
-		return false;
-	}
-	try {
-		actor->m_id = name;
-		actor->m_aliasManager = this;
-		std::unique_lock<shared_mutex> lck(m_actorMutex);
-		m_actors.insert(std::make_pair(actor->m_id, std::shared_ptr<ActorHolder>(new ActorHolder(actor, own))));
-		if (onRegistered)
-		{
-			onRegistered(this, name);
-		}
-	} catch(...) {
-		freeMq(name);
-		return false;
-	}
-	return true;
-}
-
-template<typename ActorIdType, typename MessageIdType, typename MessageType>
-void ActorManager<ActorIdType, MessageIdType, MessageType>::releaseActor(const ActorIdType& name) {
-	{
-		std::unique_lock<shared_mutex> lck(m_actorMutex);
-		m_actors.erase(name);
-	}
-	freeMq(name);
-}
-
-template<typename ActorIdType, typename MessageIdType, typename MessageType>
-bool ActorManager<ActorIdType, MessageIdType, MessageType>::start(int threadNum) {
-	char threadName[128];
-	m_bExitFlag = false;
-	for(auto i=0; i<threadNum; i++) {
-		snprintf(threadName, sizeof(threadName), "ActorThread#%04d", i);
-		m_actorThreads.Attach(threadName, std::bind(&ActorManager<ActorIdType, MessageIdType, MessageType>::ActorThread, this, std::placeholders::_1));
-	}
-	return m_actorThreads.WaitInitDone();
-}
-
-template<typename ActorIdType, typename MessageIdType, typename MessageType>
-void ActorManager<ActorIdType, MessageIdType, MessageType>::stop() {
-	{
-		std::unique_lock<shared_mutex> lck(m_actorMutex);
-		m_actors.clear();
-	}
-	m_bExitFlag = true;
-	m_mqq.close();
-	m_actorThreads.Join();
-	m_mqq.clear();
-}
-
-template<typename ActorIdType, typename MessageIdType, typename MessageType>
-ActorManager<ActorIdType, MessageIdType, MessageType>::ActorHolder::~ActorHolder() {
-	if (owned && actor) {
-		delete actor;
-	}
-}
-
-template<typename ActorIdType, typename MessageIdType, typename MessageType>
-void ActorManager<ActorIdType, MessageIdType, MessageType>::ActorThread(ThreadGroup::InitDone done) {
-	done();
-	while(!m_bExitFlag) {
-		auto maxIterator = 20;
-		std::shared_ptr<message_queue_type> q;
-		if (!m_mqq.pop(q)) {
-			continue;
-		}
-		std::unique_ptr<detail::Message<ActorIdType, MessageIdType, MessageType>> msg;
-		std::shared_ptr<ActorHolder> holder;
-		auto && id = q->alias();
-		{
-			shared_lock<shared_mutex> lck(m_actorMutex);
-			auto it = m_actors.find(id);
-			if (it == m_actors.end()) {
-				q->release();
-				continue;
-			}
-			holder = it->second;
-		}
-		//停止的时候 是否等待队列中消息处理完毕？
-		while (q->pop(msg) && !m_bExitFlag && maxIterator -- > 0) {
-			holder->actor->onMessage(msg->src, msg->id, *(msg->msg));
-		}
-		{
-			std::lock_guard<message_queue_type> lck(*q);
-			if (q->empty() || !m_mqq.push(q)) {
-				q->release();
-			}
-		}
-	}
-}

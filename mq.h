@@ -5,6 +5,7 @@
 #include <memory>
 #include <string>
 #include <condition_variable>
+#include <atomic>
 
 enum SEND_MESSAGE_RESULT
 {

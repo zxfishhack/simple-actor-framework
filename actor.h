@@ -5,6 +5,7 @@
 #include <mutex>
 #include "shared_mutex.h"
 #include "mq.h"
+#include <thread>
 
 template<typename ActorIdType = std::string, typename MessageIdType = std::string, typename MessageType = std::string>
 class ActorImpl;

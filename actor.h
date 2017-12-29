@@ -91,6 +91,7 @@ template<typename ActorIdType, typename MessageIdType, typename MessageType>
 class ActorManager
 {
 	typedef ActorImpl<ActorIdType, MessageIdType, MessageType> ActorHolder;
+	typedef detail::Message<ActorIdType, MessageIdType, MessageType> messageType;
 public:
 	~ActorManager() {
 		std::map<ActorIdType, std::shared_ptr<ActorHolder>> actors;
@@ -113,7 +114,7 @@ public:
 			delete msg;
 			return E_SMR_NOTFOUND;
 		}
-		return holder->enqueue(ActorHolder::messageType(new typename ActorHolder::messageType::element_type(sourceName, messageName, msg)));
+		return holder->enqueue(std::unique_ptr<messageType>(new messageType(sourceName, messageName, msg)));
 	}
 	bool registerActor(const ActorIdType& name, Actor<ActorIdType, MessageIdType, MessageType>* actor, size_t messageQueueOverhead = 1024) {
 		return registerActor(name, actor, true, messageQueueOverhead);

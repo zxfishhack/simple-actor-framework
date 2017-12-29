@@ -33,7 +33,7 @@ namespace detail {
 	};
 }
 
-template<typename MessageType = std::unique_ptr<detail::Message<>>, typename ActorIdType = typename MessageType::element_type::actorIdType>
+template<typename MessageType = std::unique_ptr<detail::Message<>>>
 class message_queue : public noncopyable {
 public:
 	message_queue(size_t overhead) : m_closed(false), m_overhead(overhead)

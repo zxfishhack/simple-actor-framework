@@ -8,6 +8,10 @@
 #include <functional>
 #include <type_traits>
 
+#define NESTED_LESS(l, r) \
+if (l < r) return true; \
+if (r < l) return false
+
 class noncopyable {
 public:
 	noncopyable() {}

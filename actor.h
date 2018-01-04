@@ -41,14 +41,14 @@ class ActorManager;
 template<typename ActorIdType, typename MessageIdType, typename MessageType>
 class ActorImpl {
 public:
-	typedef std::unique_ptr<detail::Message<ActorIdType, MessageIdType, MessageType>> messageType;
+	typedef typename detail::Message<ActorIdType, MessageIdType, MessageType> messageType;
 	ActorImpl(const ActorIdType& id, ActorManager<ActorIdType, MessageIdType, MessageType>* mgr, Actor<ActorIdType, MessageIdType, MessageType>* actor, bool own, size_t messageQueueOverhead)
 		: m_own(own), m_exitFlag(false), m_actor(actor), m_mgr(mgr), m_messageQueue(messageQueueOverhead) {
 		actor->m_impl = this;
 		actor->m_id = id;
 		m_thread = std::thread([this]()
 		{
-			messageType msg;
+			std::unique_ptr<messageType> msg;
 			m_actor->onEnter();
 			while(!m_exitFlag) {
 				if (!m_messageQueue.pop(msg)) {
@@ -64,7 +64,7 @@ public:
 		if (m_thread.joinable()) {
 			m_thread.join();
 		}
-		messageType msg;
+		std::unique_ptr<messageType> msg;
 		while(m_messageQueue.pop(msg)) {
 			m_actor->onMessage(msg->src, msg->id, *(msg->msg));
 		}
@@ -73,10 +73,17 @@ public:
 			delete m_actor;
 		}
 	}
-	SEND_MESSAGE_RESULT sendMessage(const ActorIdType& targetName, const MessageIdType& messageName, MessageType* msg) const {
-		return m_mgr->sendMessage(m_actor->id(), targetName, messageName, msg);
+	SEND_MESSAGE_RESULT sendMessage(const ActorIdType& targetName, const MessageIdType& messageName, MessageType* msg) {
+		if (targetName == m_actor->id())
+		{
+			return enqueue(std::unique_ptr<messageType>(new messageType(targetName, messageName, msg)));
+		}
+		else
+		{
+			return m_mgr->sendMessage(m_actor->id(), targetName, messageName, msg);
+		}
 	}
-	SEND_MESSAGE_RESULT enqueue(messageType msg) {
+	SEND_MESSAGE_RESULT enqueue(std::unique_ptr<messageType> msg) {
 		return m_messageQueue.push(std::move(msg));
 	}
 private:
@@ -84,7 +91,7 @@ private:
 	bool m_exitFlag;
 	Actor<ActorIdType, MessageIdType, MessageType>* m_actor;
 	ActorManager<ActorIdType, MessageIdType, MessageType>* m_mgr;
-	message_queue<messageType> m_messageQueue;
+	message_queue<std::unique_ptr<messageType>> m_messageQueue;
 	std::thread m_thread;
 };
 

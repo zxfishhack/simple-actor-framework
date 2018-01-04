@@ -10,6 +10,7 @@
 enum SEND_MESSAGE_RESULT
 {
 	E_SMR_OK,
+	E_SMR_OVERHEAD,
 	E_SMR_CLOSED,
 	E_SMR_MEMORY,
 	E_SMR_NOTFOUND,
@@ -53,6 +54,10 @@ public:
 			return E_SMR_MEMORY;
 		}
 		m_cv.notify_one();
+		if (m_overhead > 0 && m_msgs.size() > m_overhead)
+		{
+			return E_SMR_OVERHEAD;
+		}
 		return E_SMR_OK;
 	}
 	bool pop(MessageType& msg) {

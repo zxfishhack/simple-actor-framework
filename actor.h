@@ -8,6 +8,9 @@
 #include <thread>
 
 template<typename ActorIdType = std::string, typename MessageIdType = std::string, typename MessageType = std::string>
+class ActorManager;
+
+template<typename ActorIdType = std::string, typename MessageIdType = std::string, typename MessageType = std::string>
 class ActorImpl;
 
 template<typename ActorIdType = std::string, typename MessageIdType = std::string, typename MessageType = std::string>
@@ -29,20 +32,18 @@ public:
 	const ActorIdType& id() const {
 		return m_id;
 	}
+	ActorManager<ActorIdType, MessageIdType, MessageType>* manager();
 private:
 	friend class ActorImpl<ActorIdType, MessageIdType, MessageType>;
 	ActorImpl<ActorIdType, MessageIdType, MessageType>* m_impl;
 	ActorIdType m_id;
 };
 
-template<typename ActorIdType = std::string, typename MessageIdType = std::string, typename MessageType = std::string>
-class ActorManager;
-
 template<typename ActorIdType, typename MessageIdType, typename MessageType>
 class ActorImpl {
 public:
 	typedef typename detail::Message<ActorIdType, MessageIdType, MessageType> messageType;
-	ActorImpl(const ActorIdType& id, ActorManager<ActorIdType, MessageIdType, MessageType>* mgr, Actor<ActorIdType, MessageIdType, MessageType>* actor, bool own, size_t messageQueueOverhead)
+	ActorImpl(const ActorIdType& id, ActorManager<ActorIdType, MessageIdType, MessageType>& mgr, Actor<ActorIdType, MessageIdType, MessageType>* actor, bool own, size_t messageQueueOverhead)
 		: m_own(own), m_exitFlag(false), m_actor(actor), m_mgr(mgr), m_messageQueue(messageQueueOverhead) {
 		actor->m_impl = this;
 		actor->m_id = id;
@@ -80,20 +81,34 @@ public:
 		}
 		else
 		{
-			return m_mgr->sendMessage(m_actor->id(), targetName, messageName, msg);
+			return m_mgr.sendMessage(m_actor->id(), targetName, messageName, msg);
 		}
 	}
 	SEND_MESSAGE_RESULT enqueue(std::unique_ptr<messageType> msg) {
 		return m_messageQueue.push(std::move(msg));
 	}
+	ActorManager<ActorIdType, MessageIdType, MessageType>* manager()
+	{
+		return &m_mgr;
+	}
 private:
 	bool m_own;
 	bool m_exitFlag;
 	Actor<ActorIdType, MessageIdType, MessageType>* m_actor;
-	ActorManager<ActorIdType, MessageIdType, MessageType>* m_mgr;
+	ActorManager<ActorIdType, MessageIdType, MessageType>& m_mgr;
 	message_queue<std::unique_ptr<messageType>> m_messageQueue;
 	std::thread m_thread;
 };
+
+template<typename ActorIdType, typename MessageIdType, typename MessageType>
+ActorManager<ActorIdType, MessageIdType, MessageType>* Actor<ActorIdType, MessageIdType, MessageType>::manager()
+{
+	if (m_impl)
+	{
+		return m_impl->manager();
+	}
+	return nullptr;
+}
 
 template<typename ActorIdType, typename MessageIdType, typename MessageType>
 class ActorManager
@@ -144,7 +159,7 @@ public:
 private:
 	bool registerActor(const ActorIdType& name, Actor<ActorIdType, MessageIdType, MessageType>* actor, bool own, size_t messageQueueOverhead) {
 		try {
-			std::shared_ptr<ActorHolder> holder(new ActorHolder(name, this, actor, own, messageQueueOverhead));
+			std::shared_ptr<ActorHolder> holder(new ActorHolder(name, *this, actor, own, messageQueueOverhead));
 			std::lock_guard<shared_mutex> lck(m_actorMutex);
 			m_actors.insert(std::make_pair(name, holder));
 		}

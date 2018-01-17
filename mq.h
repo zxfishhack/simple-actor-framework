@@ -61,11 +61,19 @@ public:
 		return E_SMR_OK;
 	}
 	bool pop(MessageType& msg) {
-		msg = nullptr;
 		std::unique_lock<std::mutex> lck(m_mutex);
 		while (m_msgs.empty() && !m_closed) {
 			m_cv.wait(lck);
 		}
+		if (empty()) {
+			return false;
+		}
+		msg = std::move(m_msgs.front());
+		m_msgs.pop_front();
+		return true;
+	}
+	bool try_pop(MessageType& msg) {
+		std::unique_lock<std::mutex> lck(m_mutex);
 		if (empty()) {
 			return false;
 		}

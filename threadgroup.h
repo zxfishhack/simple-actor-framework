@@ -54,7 +54,11 @@ public:
 	{
 		while(m_initDone < m_initNeed && !m_initError)
 		{
+#if _MSC_VER <= 1700
+			Sleep(1);
+#else
 			std::this_thread::sleep_for(std::chrono::milliseconds(1));
+#endif
 		}
 		return !m_initError;
 	}

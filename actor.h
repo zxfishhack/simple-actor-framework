@@ -66,7 +66,7 @@ public:
 			m_thread.join();
 		}
 		std::unique_ptr<messageType> msg;
-		while(m_messageQueue.pop(msg)) {
+		while(m_messageQueue.try_pop(msg)) {
 			m_actor->onMessage(msg->src, msg->id, *(msg->msg));
 		}
 		m_actor->onExit();

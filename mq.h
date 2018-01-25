@@ -82,11 +82,15 @@ public:
 		return true;
 	}
 	bool overhead() {
-		std::lock_guard<std::mutex> lck(m_mutex);
-		return m_overhead > 0 ? m_msgs.size() > m_overhead : false;
+		return m_overhead > 0 ? size() > m_overhead : false;
 	}
 	bool empty() const {
 		return m_msgs.empty();
+	}
+	size_t size()
+	{
+		std::lock_guard<std::mutex> lck(m_mutex);
+		return m_msgs.size();
 	}
 	void close() {
 		m_closed = true;

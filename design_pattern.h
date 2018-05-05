@@ -1,7 +1,8 @@
 #pragma once
-#if _MSC_VER >= 1900
+#if _MSC_VER >= 1900 || __cplusplus >= 199711L
 #include <mutex>
 #include <atomic>
+#include <memory>
 #endif
 #include <map>
 #include <deque>
@@ -65,7 +66,7 @@ template<typename T> std::once_flag Singleton<T>::_create;
 template<typename T> std::once_flag Singleton<T>::_delete;
 #endif
 
-#if _MSC_VER >= 1900
+#if _MSC_VER >= 1900 || (!defined(_MSC_VER) && __cplusplus >= 199711L)
 
 template<typename ListenerFunction, typename ListenerHandle = size_t>
 class Listener : public noncopyable {

@@ -93,6 +93,7 @@ public:
 		return m_msgs.size();
 	}
 	void close() {
+		std::lock_guard<std::mutex> lck(m_mutex);
 		m_closed = true;
 		m_cv.notify_all();
 	}

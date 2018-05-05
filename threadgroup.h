@@ -5,6 +5,13 @@
 #include <atomic>
 #include <exception>
 
+#ifdef LOG4CPP_CATEGORY_NAME
+#include <log4cpp/Category.hh>
+#endif
+#ifndef _WIN32
+#include <pthread.h>
+#endif
+
 class ThreadGroup
 {
 public:
@@ -31,9 +38,11 @@ public:
 			m_Threads.push_back(ctx);
 			return true;
 		}
-		catch(const std::exception&)
+		catch(const std::exception& e)
 		{
-			//m_log.notice("TG[%s] T[%s] begin failed, exception[%s].", m_name.c_str(), name, e.what());
+#ifdef LOG4CPP_CATEGORY_NAME
+			log4cpp::Category::getInstance(LOG4CPP_CATEGORY_NAME).notice("TG[%s] T[%s] begin failed, exception[%s].", m_name.c_str(), name, e.what());
+#endif
 			m_initError = true;
 			return false;
 		}
@@ -73,14 +82,26 @@ private:
 
 	void Runner(Thread* ctx, std::function<void(InitDone)> func)
 	{
-		//m_log.info("TG[%s], T[%s] begined.", m_name.c_str(), ctx->name.c_str());
+#ifdef LOG4CPP_CATEGORY_NAME
+		log4cpp::Category::getInstance(LOG4CPP_CATEGORY_NAME).info("TG[%s], T[%s] begined.", m_name.c_str(), ctx->name.c_str());
+#endif
+#if defined(_GNU_SOURCE) && defined(__GLIBC_PREREQ)
+#if __GLIBC_PREREQ(2, 12)
+		char name_buf[16];
+		snprintf(name_buf, sizeof name_buf, ctx->name.c_str());
+		name_buf[sizeof name_buf - 1] = '\0';
+		pthread_setname_np(pthread_self(), name_buf);
+#endif
+#endif
 		try
 		{
 			func(m_done);
 		}
-		catch(const std::exception& )
+		catch(const std::exception& e)
 		{
-			//m_log.notice("TG[%s], T[%s] end with exception[%s].", m_name.c_str(), ctx->name.c_str(), e.what());
+#ifdef LOG4CPP_CATEGORY_NAME
+			log4cpp::Category::getInstance(LOG4CPP_CATEGORY_NAME).notice("TG[%s], T[%s] end with exception[%s].", m_name.c_str(), ctx->name.c_str(), e.what());
+#endif
 			m_initError = true;
 			return;
 		}
@@ -89,6 +110,8 @@ private:
 			m_initError = true;
 			return;
 		}
-		//m_log.info("TG[%s], T[%s] end.", m_name.c_str(), ctx->name.c_str());
+#ifdef LOG4CPP_CATEGORY_NAME
+		log4cpp::Category::getInstance(LOG4CPP_CATEGORY_NAME).info("TG[%s], T[%s] end.", m_name.c_str(), ctx->name.c_str());
+#endif
 	}
 };

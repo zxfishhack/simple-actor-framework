@@ -5,7 +5,12 @@
 #include <mutex>
 #include "shared_mutex.h"
 #include "mq.h"
+#include <sstream>
 #include <thread>
+
+#ifdef LOG4CPP_CATEGORY_NAME
+#include <log4cpp/Category.hh>
+#endif
 
 template<typename ActorIdType = std::string, typename MessageIdType = std::string, typename MessageType = std::string>
 class ActorManager;
@@ -26,7 +31,14 @@ public:
 		}
 		return m_impl->sendMessage(targetName, messageName, msg);
 	}
+	//implement one of below
+	//onEnter will never failed.
 	virtual void onEnter() {}
+	//onEnter will failed.
+	virtual bool onEnterMayFailed() {
+		onEnter();
+		return true;
+	}
 	virtual void onExit() {}
 	virtual void onMessage(const ActorIdType& sourceName, const MessageIdType& messageName, const MessageType& msg) = 0;
 	const ActorIdType& id() const {
@@ -44,13 +56,40 @@ class ActorImpl {
 public:
 	typedef typename detail::Message<ActorIdType, MessageIdType, MessageType> messageType;
 	ActorImpl(const ActorIdType& id, ActorManager<ActorIdType, MessageIdType, MessageType>& mgr, Actor<ActorIdType, MessageIdType, MessageType>* actor, bool own, size_t messageQueueOverhead)
-		: m_own(own), m_exitFlag(false), m_actor(actor), m_mgr(mgr), m_messageQueue(messageQueueOverhead) {
+		: m_own(own), m_exitFlag(false), m_initDone(false), m_initSucc(false), m_actor(actor), m_mgr(mgr), m_messageQueue(messageQueueOverhead) {
 		actor->m_impl = this;
 		actor->m_id = id;
 		m_thread = std::thread([this]()
 		{
+#if defined(_GNU_SOURCE) && defined(__GLIBC_PREREQ)
+#if __GLIBC_PREREQ(2, 12)
+			{
+				char name_buf[16];
+				std::ostringstream ss;
+				ss << "actor:" << m_actor->m_id;
+				std::string name = ss.str();
+				snprintf(name_buf, sizeof name_buf, name.c_str());
+				name_buf[sizeof name_buf - 1] = '\0';
+				pthread_setname_np(pthread_self(), name_buf);
+			}
+#endif
+#endif
 			std::unique_ptr<messageType> msg;
-			m_actor->onEnter();
+#ifdef LOG4CPP_CATEGORY_NAME
+			std::ostringstream ss;
+			ss << "actor:" << m_actor->m_id;
+			std::string name = ss.str();
+			log4cpp::Category::getInstance(LOG4CPP_CATEGORY_NAME).notice("Actor[%s] onEnter enter.", name.c_str());
+#endif
+			m_initSucc = m_actor->onEnterMayFailed();
+			m_initDone = true;
+#ifdef LOG4CPP_CATEGORY_NAME
+			log4cpp::Category::getInstance(LOG4CPP_CATEGORY_NAME).notice("Actor[%s] onEnter exit [%s].", name.c_str(), m_initSucc ? "true" : "false");
+#endif
+			if (!m_initSucc)
+			{
+				return;
+			}
 			while(!m_exitFlag) {
 				if (!m_messageQueue.pop(msg)) {
 					continue;
@@ -69,10 +108,25 @@ public:
 		while(m_messageQueue.try_pop(msg)) {
 			m_actor->onMessage(msg->src, msg->id, *(msg->msg));
 		}
+#ifdef LOG4CPP_CATEGORY_NAME
+		std::ostringstream ss;
+		ss << "actor:" << m_actor->m_id;
+		std::string name = ss.str();
+		log4cpp::Category::getInstance(LOG4CPP_CATEGORY_NAME).notice("Actor[%s] onExit enter.", name.c_str());
+#endif
 		m_actor->onExit();
+#ifdef LOG4CPP_CATEGORY_NAME
+		log4cpp::Category::getInstance(LOG4CPP_CATEGORY_NAME).notice("Actor[%s] onExit exit.", name.c_str());
+#endif
 		if (m_own) {
 			delete m_actor;
 		}
+	}
+	bool WaitInitDone() const {
+		while(!m_initDone) {
+			std::this_thread::yield();
+		}
+		return m_initSucc;
 	}
 	SEND_MESSAGE_RESULT sendMessage(const ActorIdType& targetName, const MessageIdType& messageName, MessageType* msg) {
 		if (targetName == m_actor->id())
@@ -92,8 +146,10 @@ public:
 		return &m_mgr;
 	}
 private:
-	bool m_own;
-	bool m_exitFlag;
+	volatile bool m_own;
+	volatile bool m_exitFlag;
+	volatile bool m_initDone;
+	volatile bool m_initSucc;
 	Actor<ActorIdType, MessageIdType, MessageType>* m_actor;
 	ActorManager<ActorIdType, MessageIdType, MessageType>& m_mgr;
 	message_queue<std::unique_ptr<messageType>> m_messageQueue;
@@ -156,10 +212,18 @@ public:
 			}
 		}
 	}
+	bool hasActor(const ActorIdType& name) {
+		shared_lock<shared_mutex> lck(m_actorMutex);
+		return m_actors.find(name) != m_actors.end();
+	}
 private:
 	bool registerActor(const ActorIdType& name, Actor<ActorIdType, MessageIdType, MessageType>* actor, bool own, size_t messageQueueOverhead) {
 		try {
 			std::shared_ptr<ActorHolder> holder(new ActorHolder(name, *this, actor, own, messageQueueOverhead));
+			if (!holder->WaitInitDone())
+			{
+				return false;
+			}
 			std::lock_guard<shared_mutex> lck(m_actorMutex);
 			m_actors.insert(std::make_pair(name, holder));
 		}

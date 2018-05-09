@@ -59,6 +59,9 @@ public:
 		: m_own(own), m_exitFlag(false), m_initDone(false), m_initSucc(false), m_actor(actor), m_mgr(mgr), m_messageQueue(messageQueueOverhead) {
 		actor->m_impl = this;
 		actor->m_id = id;
+	}
+	bool WaitInitDone()
+	{
 		m_thread = std::thread([this]()
 		{
 #if defined(_GNU_SOURCE) && defined(__GLIBC_PREREQ)
@@ -97,6 +100,10 @@ public:
 				m_actor->onMessage(msg->src, msg->id, *(msg->msg));
 			}
 		});
+		while(!m_initDone) {
+			std::this_thread::yield();
+		}
+		return m_initSucc;
 	}
 	~ActorImpl() {
 		m_exitFlag = true;
@@ -121,12 +128,6 @@ public:
 		if (m_own) {
 			delete m_actor;
 		}
-	}
-	bool WaitInitDone() const {
-		while(!m_initDone) {
-			std::this_thread::yield();
-		}
-		return m_initSucc;
 	}
 	SEND_MESSAGE_RESULT sendMessage(const ActorIdType& targetName, const MessageIdType& messageName, MessageType* msg) {
 		if (targetName == m_actor->id())
@@ -220,14 +221,20 @@ private:
 	bool registerActor(const ActorIdType& name, Actor<ActorIdType, MessageIdType, MessageType>* actor, bool own, size_t messageQueueOverhead) {
 		try {
 			std::shared_ptr<ActorHolder> holder(new ActorHolder(name, *this, actor, own, messageQueueOverhead));
+			{
+				std::lock_guard<shared_mutex> lck(m_actorMutex);
+				m_actors.insert(std::make_pair(name, holder));
+			}
 			if (!holder->WaitInitDone())
 			{
+				std::lock_guard<shared_mutex> lck(m_actorMutex);
+				m_actors.erase(name);
 				return false;
 			}
-			std::lock_guard<shared_mutex> lck(m_actorMutex);
-			m_actors.insert(std::make_pair(name, holder));
 		}
 		catch(...) {
+			std::lock_guard<shared_mutex> lck(m_actorMutex);
+			m_actors.erase(name);
 			return false;
 		}
 		return true;

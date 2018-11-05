@@ -55,6 +55,7 @@ public:
 			if (thr->joinable()) {
 				thr->join();
 			}
+			delete thr;
 			delete *it;
 		}
 		m_Threads.clear();

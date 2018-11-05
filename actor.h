@@ -16,7 +16,7 @@
 template<typename ActorIdType = std::string, typename MessageIdType = std::string, typename MessageType = std::string>
 class ActorManager;
 
-template<typename ActorIdType = std::string>
+template<typename ActorIdType, typename messageType>
 class ActorImplBase
 {
 public:
@@ -27,6 +27,7 @@ public:
 	}
 	virtual void Poll() {}
 	virtual const ActorIdType& id() const = 0;
+	virtual SEND_MESSAGE_RESULT enqueue(std::unique_ptr<messageType> msg) = 0;
 };
 
 template<typename ActorIdType = std::string, typename MessageIdType = std::string, typename MessageType = std::string>
@@ -102,7 +103,7 @@ private:
 };
 
 template<typename ActorIdType, typename MessageIdType, typename MessageType>
-class ActorImpl : public ActorImplBase<ActorIdType> {
+class ActorImpl : public ActorImplBase<ActorIdType, detail::Message<ActorIdType, MessageIdType, MessageType>> {
 public:
 	typedef typename detail::Message<ActorIdType, MessageIdType, MessageType> messageType;
 	ActorImpl(const ActorIdType& id, ActorManager<ActorIdType, MessageIdType, MessageType>& mgr, Actor<ActorIdType, MessageIdType, MessageType>* actor, bool own, size_t messageQueueOverhead)
@@ -192,7 +193,7 @@ public:
 			return m_mgr.sendMessage(m_actor->id(), targetName, messageName, msg);
 		}
 	}
-	SEND_MESSAGE_RESULT enqueue(std::unique_ptr<messageType> msg) {
+	SEND_MESSAGE_RESULT enqueue(std::unique_ptr<messageType> msg) override {
 		return m_messageQueue.push(std::move(msg));
 	}
 	ActorManager<ActorIdType, MessageIdType, MessageType>* manager()
@@ -211,7 +212,7 @@ private:
 };
 
 template<typename ActorIdType, typename MessageIdType, typename MessageType>
-class ActorImplNoThread : public ActorImplBase<ActorIdType> {
+class ActorImplNoThread : public ActorImplBase<ActorIdType, detail::Message<ActorIdType, MessageIdType, MessageType>> {
 public:
 	typedef typename detail::Message<ActorIdType, MessageIdType, MessageType> messageType;
 	ActorImplNoThread(const ActorIdType& id, ActorManager<ActorIdType, MessageIdType, MessageType>& mgr, Actor<ActorIdType, MessageIdType, MessageType>* actor, bool own, size_t messageQueueOverhead)
@@ -260,7 +261,6 @@ public:
 			if (!m_messageQueue.try_pop(msg)) {
 				break;
 			}
-			hasProcess = true;
 			m_actor->onMessage(msg->src, msg->id, *(msg->msg));
 		}
 	}
@@ -277,7 +277,7 @@ public:
 			return m_mgr.sendMessage(m_actor->id(), targetName, messageName, msg);
 		}
 	}
-	SEND_MESSAGE_RESULT enqueue(std::unique_ptr<messageType> msg) {
+	SEND_MESSAGE_RESULT enqueue(std::unique_ptr<messageType> msg) override {
 		return m_messageQueue.push(std::move(msg));
 	}
 	ActorManager<ActorIdType, MessageIdType, MessageType>* manager()
@@ -310,17 +310,17 @@ ActorManager<ActorIdType, MessageIdType, MessageType>* Actor<ActorIdType, Messag
 template<typename ActorIdType, typename MessageIdType, typename MessageType>
 class ActorManager
 {
-	typedef ActorImplBase<ActorIdType> ActorHolder;
+	typedef ActorImplBase<ActorIdType, detail::Message<ActorIdType, MessageIdType, MessageType>> ActorHolder;
 	typedef detail::Message<ActorIdType, MessageIdType, MessageType> messageType;
 public:
-	ActorManager(unsigned int threadPoolSize = 1) : m_threadGroup("am"), m_exitFlag(false) {
+	ActorManager(unsigned int threadPoolSize = 1) : m_actorQueue(0), m_threadGroup("am"), m_exitFlag(false) {
 		if (threadPoolSize == 0) {
 			threadPoolSize = std::thread::hardware_concurrency();
 		}
 		for(unsigned int i=0; i<threadPoolSize; i++) {
 			char thrName[256] = { 0 };
 			snprintf(thrName, sizeof(thrName), "pool-%03d", i + 1);
-			m_threadGroup.Attach(thrName, std::bind(&pollRoutine, this));
+			m_threadGroup.Attach(thrName, std::bind(&ActorManager<ActorIdType, MessageIdType, MessageType>::pollRoutine, this, std::placeholders::_1));
 		}
 		m_threadGroup.WaitInitDone();
 	}
@@ -364,7 +364,7 @@ public:
 		return registerActor(name, holder);
 	}
 	bool registerActor(const ActorIdType& name, ActorNoThread<ActorIdType, MessageIdType, MessageType>* actor, size_t messageQueueOverhead = 1024) {
-		std::shared_ptr<ActorHolder> holder(new ActorImplNoThread<><ActorIdType, MessageIdType, MessageType>(name, *this, actor, true, messageQueueOverhead));
+		std::shared_ptr<ActorHolder> holder(new ActorImplNoThread<ActorIdType, MessageIdType, MessageType>(name, *this, actor, true, messageQueueOverhead));
 		return registerActor(name, holder);
 	}
 	bool registerActor(const ActorIdType& name, ActorNoThread<ActorIdType, MessageIdType, MessageType>& actor, size_t messageQueueOverhead = 1024) {
@@ -404,7 +404,7 @@ public:
 			{
 				std::lock_guard<shared_mutex> lck(m_actorMutex);
 				if (m_actors.find(actor->id()) != m_actors.end()) {
-					m_actorQueue.push(actor);
+					m_actorQueue.push(std::move(actor));
 				}
 			}
 		}
@@ -425,10 +425,11 @@ private:
 				std::lock_guard<shared_mutex> lck(m_actorMutex);
 				m_actors.insert(std::make_pair(name, actor));
 				if (actor->InThreadPool()) {
-					m_actorQueue.push(actor);
+					std::shared_ptr<ActorHolder> tmp = actor;
+					m_actorQueue.push(std::move(tmp));
 				}
 			}
-			if (!holder->WaitInitDone())
+			if (!actor->WaitInitDone())
 			{
 #ifdef LOG4CPP_CATEGORY_NAME
 				std::ostringstream ss;
